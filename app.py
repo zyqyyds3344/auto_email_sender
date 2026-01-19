@@ -15,6 +15,7 @@ from email.header import Header
 from email.utils import formataddr
 import mimetypes
 from openpyxl import load_workbook
+import zipfile
 
 app = Flask(__name__)
 app.secret_key = 'email_sender_secret_key_2024'
@@ -101,7 +102,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="section">
                     <div class="section-title">1. 导入数据</div>
                     <div class="upload-area">
-                        <input type="file" id="excelFile" class="file-input" accept=".xlsx,.xls">
+                        <input type="file" id="excelFile" class="file-input" accept=".xlsx">
                         <button class="btn btn-primary" onclick="document.getElementById('excelFile').click()">📂 导入Excel</button>
                         <input type="file" id="attachFiles" class="file-input" multiple>
                         <button class="btn btn-warning" onclick="document.getElementById('attachFiles').click()">📎 添加附件</button>
@@ -269,11 +270,32 @@ def upload_excel():
     if file.filename == '':
         return jsonify({'success': False, 'error': '没有选择文件'})
     try:
+        original_name = file.filename
+        lower_name = (original_name or '').lower()
+        if not lower_name.endswith('.xlsx'):
+            return jsonify({
+                'success': False,
+                'error': '请上传 .xlsx 格式的Excel文件（openpyxl不支持 .xls）。请用Excel打开后“另存为 -> Excel 工作簿(*.xlsx)”再上传。'
+            })
+
         filename = secure_filename(file.filename) or 'upload.xlsx'
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
+
+        # xlsx本质上是zip包：如果不是zip，大概率是旧版xls/伪xlsx/导出格式不对
+        if not zipfile.is_zipfile(filepath):
+            return jsonify({
+                'success': False,
+                'error': '你上传的文件虽然是 .xlsx 后缀，但内容不是标准xlsx格式。请用Excel打开该文件，然后“文件->另存为->Excel 工作簿(*.xlsx)”重新保存后再上传。'
+            })
         
-        wb = load_workbook(filepath)
+        try:
+            wb = load_workbook(filepath)
+        except Exception:
+            return jsonify({
+                'success': False,
+                'error': 'Excel解析失败：请确认文件能在Excel里正常打开，并重新“另存为 .xlsx”后再上传（不支持 .xls / WPS某些导出格式）。'
+            })
         ws = wb.active
         headers = [cell.value for cell in ws[1]]
         
