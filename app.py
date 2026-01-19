@@ -5,7 +5,8 @@
 
 import os
 import smtplib
-from flask import Flask, request, jsonify, session
+from io import BytesIO
+from flask import Flask, request, jsonify, session, send_file
 from werkzeug.utils import secure_filename
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -14,7 +15,7 @@ from email import encoders
 from email.header import Header
 from email.utils import formataddr
 import mimetypes
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
 import zipfile
 
 app = Flask(__name__)
@@ -104,6 +105,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="upload-area">
                         <input type="file" id="excelFile" class="file-input" accept=".xlsx">
                         <button class="btn btn-primary" onclick="document.getElementById('excelFile').click()">📂 导入Excel</button>
+                        <button class="btn btn-primary" onclick="window.location.href='/download_template'">⬇️ 下载标准模板.xlsx</button>
                         <input type="file" id="attachFiles" class="file-input" multiple>
                         <button class="btn btn-warning" onclick="document.getElementById('attachFiles').click()">📎 添加附件</button>
                     </div>
@@ -262,6 +264,25 @@ def index():
     return HTML_TEMPLATE
 
 
+@app.route('/download_template', methods=['GET'])
+def download_template():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '公司列表'
+    ws.append(['公司名称', '邮箱地址', '负责人'])
+    ws.append(['示例公司A', 'test@example.com', '张三'])
+    ws.append(['示例公司B', 'test2@example.com', '李四'])
+    bio = BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name='公司列表模板.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
 @app.route('/upload_excel', methods=['POST'])
 def upload_excel():
     if 'file' not in request.files:
@@ -287,25 +308,55 @@ def upload_excel():
         except Exception as e:
             return jsonify({
                 'success': False,
-                'error': f'Excel解析失败：{str(e)}。请确认文件能在Excel里正常打开，并重新"另存为 .xlsx"后再上传。'
+                'error': f'Excel解析失败：{str(e)}。建议直接点击页面上的“下载标准模板.xlsx”，按模板填写后再上传。'
             })
+
         ws = wb.active
-        headers = [cell.value for cell in ws[1]]
-        
-        if '公司名称' not in headers or '邮箱地址' not in headers:
-            return jsonify({'success': False, 'error': 'Excel必须包含"公司名称"和"邮箱地址"列'})
-        
-        name_idx = headers.index('公司名称')
-        email_idx = headers.index('邮箱地址')
-        contact_idx = headers.index('负责人') if '负责人' in headers else -1
+
+        def _norm_header(v):
+            if v is None:
+                return ''
+            s = str(v)
+            s = s.replace('\u3000', ' ')
+            s = s.strip()
+            return s
+
+        raw_headers = [cell.value for cell in ws[1]]
+        headers = [_norm_header(h) for h in raw_headers]
+
+        def _find_col(candidates):
+            for cand in candidates:
+                c = _norm_header(cand)
+                if not c:
+                    continue
+                for i, h in enumerate(headers):
+                    if h == c:
+                        return i
+            return -1
+
+        name_idx = _find_col(['公司名称', '公司', '企业名称', '单位名称', '单位'])
+        email_idx = _find_col(['邮箱地址', '邮箱', 'Email', 'email', 'E-mail', 'E_mail'])
+        contact_idx = _find_col(['负责人', '联系人', '联系人姓名', '姓名', '对接人'])
+
+        if name_idx < 0 or email_idx < 0:
+            detected = [h for h in headers if h]
+            return jsonify({
+                'success': False,
+                'error': 'Excel表头识别失败：必须包含“公司名称/公司/企业名称”和“邮箱地址/邮箱/Email”。\n'
+                         f'识别到的表头：{detected}\n'
+                         '建议：点击“下载标准模板.xlsx”，把你的数据复制进去后再上传。'
+            })
         
         companies = []
         for row in ws.iter_rows(min_row=2, values_only=True):
-            name = str(row[name_idx] or '').strip()
-            email = str(row[email_idx] or '').strip()
-            contact = str(row[contact_idx] or '负责人').strip() if contact_idx >= 0 else '负责人'
-            if name and email and name != 'None':
-                companies.append({'name': name, 'email': email, 'contact': contact if contact and contact != 'None' else '负责人'})
+            name = str(row[name_idx] if name_idx < len(row) else '' or '').strip()
+            email = str(row[email_idx] if email_idx < len(row) else '' or '').strip()
+            contact_raw = (row[contact_idx] if (contact_idx >= 0 and contact_idx < len(row)) else '负责人')
+            contact = str(contact_raw or '负责人').strip()
+            if not contact or contact.lower() == 'none':
+                contact = '负责人'
+            if name and email and name.lower() != 'none' and email.lower() != 'none':
+                companies.append({'name': name, 'email': email, 'contact': contact})
         
         session['companies'] = companies
         session['sent_status'] = [False] * len(companies)
