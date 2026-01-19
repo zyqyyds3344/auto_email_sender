@@ -17,7 +17,7 @@ from email.header import Header, make_header, decode_header
 from email.utils import formataddr
 import mimetypes
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='.')
 app.secret_key = 'email_sender_secret_key_2024'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
@@ -349,3 +349,4 @@ def send_all():
 if __name__ == '__main__':
     # 局域网内可访问，使用 0.0.0.0
     app.run(host='0.0.0.0', port=5000, debug=True)
+
