@@ -282,19 +282,12 @@ def upload_excel():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-        # xlsx本质上是zip包：如果不是zip，大概率是旧版xls/伪xlsx/导出格式不对
-        if not zipfile.is_zipfile(filepath):
-            return jsonify({
-                'success': False,
-                'error': '你上传的文件虽然是 .xlsx 后缀，但内容不是标准xlsx格式。请用Excel打开该文件，然后“文件->另存为->Excel 工作簿(*.xlsx)”重新保存后再上传。'
-            })
-        
         try:
             wb = load_workbook(filepath)
-        except Exception:
+        except Exception as e:
             return jsonify({
                 'success': False,
-                'error': 'Excel解析失败：请确认文件能在Excel里正常打开，并重新“另存为 .xlsx”后再上传（不支持 .xls / WPS某些导出格式）。'
+                'error': f'Excel解析失败：{str(e)}。请确认文件能在Excel里正常打开，并重新"另存为 .xlsx"后再上传。'
             })
         ws = wb.active
         headers = [cell.value for cell in ws[1]]
