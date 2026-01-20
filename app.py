@@ -293,18 +293,15 @@ def upload_excel():
     try:
         original_name = file.filename
         lower_name = (original_name or '').lower()
-        if not lower_name.endswith('.xlsx'):
+        if not lower_name.endswith(('.xlsx', '.xlsm', '.xltx', '.xltm')):
             return jsonify({
                 'success': False,
                 'error': '请上传 .xlsx 格式的Excel文件（openpyxl不支持 .xls）。请用Excel打开后“另存为 -> Excel 工作簿(*.xlsx)”再上传。'
             })
 
-        filename = secure_filename(file.filename) or 'upload.xlsx'
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-
         try:
-            wb = load_workbook(filepath)
+            file_content = BytesIO(file.read())
+            wb = load_workbook(file_content)
         except Exception as e:
             return jsonify({
                 'success': False,
